@@ -24,7 +24,7 @@ cd web
 node server.mjs
 ```
 
-Open <http://127.0.0.1:4173>. When `.venv` is present, the Node server also starts the local API on `127.0.0.1:4174`. Camera recording requires browser permission. Keep both terminal processes alive while using the app. The API reports “model setup needed” until a checkpoint is trained.
+Open <http://127.0.0.1:4173>. When `.venv` is present, the Node server also starts the local API on `127.0.0.1:4174`. Camera recording requires browser permission. Keep both terminal processes alive while using the app. The local trained checkpoint is available in this workspace; a fresh clone must train or otherwise provide an ignored checkpoint before video prediction works.
 
 ## Reproduce the pilot
 
@@ -59,4 +59,4 @@ Raw videos, generated manifests, checkpoints, and experiment outputs stay out of
 
 ## Scope and limitations
 
-The prototype recognizes one isolated sign per clip. It does not decode continuous signing, model sign boundaries/co-articulation, provide a calibrated open-set unknown-sign detector, or guarantee generalization to unseen signers. Text-to-sign is a word lookup from an attributed recorded dataset clip. It is not sentence translation or an avatar. ASR, speech-to-sign, regional-language translation, and generated animation are not implemented.
+The prototype recognizes one isolated sign per clip. It does not decode continuous signing, model sign boundaries/co-articulation, provide a calibrated open-set unknown-sign detector, or guarantee generalization to unseen signers. Text-to-sign is an exact dataset-label lookup from an attributed recorded clip. It is not sentence translation or an avatar. ASR, speech-to-sign, regional-language translation, and generated animation are not implemented.

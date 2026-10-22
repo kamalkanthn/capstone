@@ -17,8 +17,8 @@ The workspace contains research PDFs and reports, a 12-slide panel deck, additio
 | Data | Amrita SLR v1 archive downloaded and extracted locally. Inventory found 978 videos in 49 numbered class folders, with no signer metadata in the archive. Source record reports 50 signs and 7 signers; one class discrepancy remains unresolved. |
 | Manifest | `scripts/prepare_amrita.py` creates reproducible per-class clip-stratified train/validation/test splits. `scripts/validate_dataset.py` passed against all 978 files. This is not a signer-independent protocol. |
 | Model | MobileNetV3-Small visual encoder with bidirectional GRU temporal head. Trained locally on the RTX 3050; clean unaugmented clip-level test: 54.4% accuracy, 0.524 macro-F1, 194 ms mean decode-plus-model latency per clip. |
-| Inference API | FastAPI video upload prediction, health endpoint, and exact one-word recorded clip lookup. Local Node server starts the API when `.venv` is present after server restart. |
-| Text to sign | Exact one-word lookup of a recorded dataset clip. No sentence planning, grammar conversion, generated animation, or avatar. |
+| Inference API | FastAPI video upload prediction, health endpoint, and exact dataset-label recorded clip lookup. Local Node server starts the API when `.venv` is present. |
+| Text to sign | Exact dataset-label lookup of a recorded clip, including multiword class labels such as “good morning.” No sentence planning, grammar conversion, generated animation, or avatar. |
 | Speech/audio | Browser TTS for typed text and spoken recognized labels. ASR and audio-to-sign are absent. |
 | Generalization | Signer IDs are unavailable in the archive. The pilot split is clip-level, so test signers may occur in train. Unknown-sign rejection is not calibrated with out-of-vocabulary clips. |
 | CI and repo | GitHub repository exists. CI is configured but has not been reported as passing on GitHub. |
