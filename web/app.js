@@ -39,14 +39,14 @@ async function checkBackend() {
 }
 
 const routeMessages = {
-  'video:text': 'Upload a short clip of one isolated sign. The local model returns its vocabulary label after training.',
-  'video:speech': 'Upload a short isolated sign clip. The local model can speak the recognized vocabulary label after training.',
+  'video:text': 'Upload a short clip of one isolated sign. The local 49-label model returns its top candidates for your review.',
+  'video:speech': 'Upload a short isolated sign clip. Review the model’s label candidates, then speak the selected label.',
   'video:sign': 'This route is unsupported: video recognition and verified sign output assets are not available yet.',
-  'video:both': 'Upload one isolated sign. The local model returns its label and can speak it when a checkpoint is available.',
-  'camera:text': 'Record one isolated sign clip. Recognition runs when you prepare the output, after model training.',
-  'camera:speech': 'Record one isolated sign clip. The model can speak its predicted vocabulary label after training.',
+  'video:both': 'Upload one isolated sign. Review the top candidate labels and speak your selected result.',
+  'camera:text': 'Record one isolated sign clip, then review the model’s top label candidates.',
+  'camera:speech': 'Record one isolated sign clip. Review the candidates and speak the selected label.',
   'camera:sign': 'This route is unsupported: live recognition and verified sign output assets are not available yet.',
-  'camera:both': 'Record one isolated sign. The local model returns and can speak its label when a checkpoint is available.',
+  'camera:both': 'Record one isolated sign. Review the candidate labels and speak your selected result.',
   'audio:text': 'Audio preview works locally. Speech transcription (ASR) is not connected yet.',
   'audio:speech': 'Audio playback is available in the preview. Transcription and sign conversion are not part of this route.',
   'audio:sign': 'This route is unsupported: ASR and verified sign output assets are not available yet.',
@@ -229,18 +229,49 @@ async function recognizeVideo(file, output) {
     const response = await fetch(`${API}/api/predict`, {method:'POST', body:form});
     const payload = await response.json();
     if (!response.ok) throw new Error(typeof payload.detail === 'string' ? payload.detail : JSON.stringify(payload.detail));
+    const choices = (payload.alternatives || []).map((candidate, index) => `<button type="button" class="candidate-choice" data-label="${escapeHtml(candidate.label)}">${index + 1}. ${escapeHtml(candidate.label)} · ${(candidate.confidence * 100).toFixed(1)}%</button>`).join('');
+    const candidatePanel = `<div class="candidate-panel"><strong>Review candidates</strong><div>${choices}</div><small>Click a label to select your reviewed text.</small></div>`;
     if (!payload.accepted) {
-      showResult('Prediction needs review', `${escapeHtml(payload.message)}<br><br>Top confidence: ${(payload.confidence * 100).toFixed(1)}% · Rejection threshold: ${(payload.threshold * 100).toFixed(1)}% · ${payload.latency_ms.toFixed(0)} ms`, 'LOW CONFIDENCE');
+      showResult('Prediction needs review', `${escapeHtml(payload.message)}<br><br>Top confidence: ${(payload.confidence * 100).toFixed(1)}% · Review threshold: ${(payload.threshold * 100).toFixed(1)}% · ${payload.latency_ms.toFixed(0)} ms${candidatePanel}`);
+      wireCandidateChoices(output);
       return;
     }
     const label = payload.label;
-    const speakControl = `<div class="speech-controls"><button id="speakButton">▶ Speak sign label</button><button id="copyResult">Copy text</button></div>`;
-    showResult('Recognized sign', `<strong>${escapeHtml(label)}</strong><br><br>Isolated vocabulary prediction · Confidence ${(payload.confidence * 100).toFixed(1)}% · ${payload.latency_ms.toFixed(0)} ms<br><small>${escapeHtml(payload.message)}</small>`, 'REVIEW RESULT', output === 'text' ? '' : speakControl);
-    if (output !== 'text') document.querySelector('#speakButton').addEventListener('click', () => { speechSynthesis.cancel(); speechSynthesis.speak(new SpeechSynthesisUtterance(label)); });
-    document.querySelector('#copyResult')?.addEventListener('click', async () => navigator.clipboard.writeText(label));
+    const controls = `<div class="speech-controls">${output === 'text' ? '' : '<button id="speakButton">▶ Speak selected label</button>'}<button id="copyResult">Copy selected text</button></div>`;
+    showResult('Recognized sign', `<strong id="recognizedLabel">${escapeHtml(label)}</strong><br><br>Isolated vocabulary prediction · Confidence ${(payload.confidence * 100).toFixed(1)}% · ${payload.latency_ms.toFixed(0)} ms<br><small>${escapeHtml(payload.message)}</small>${candidatePanel}`, 'REVIEW RESULT', controls);
+    document.querySelector('#speakButton')?.addEventListener('click', speakRecognizedLabel);
+    document.querySelector('#copyResult')?.addEventListener('click', copyRecognizedLabel);
+    wireCandidateChoices(output);
   } catch (error) {
     showResult('Recognition unavailable', `${escapeHtml(error.message)}<br><br>Check that the local API and trained checkpoint are running.`, 'UNAVAILABLE');
   }
+}
+
+function wireCandidateChoices(output = 'text') {
+  document.querySelectorAll('.candidate-choice').forEach(button => button.addEventListener('click', () => {
+    const selected = button.dataset.label || '';
+    const labelNode = document.querySelector('#recognizedLabel');
+    if (labelNode) {
+      labelNode.textContent = selected;
+      document.querySelector('#resultTitle').textContent = 'Review selected label';
+      document.querySelector('#resultState').textContent = 'USER REVIEW';
+    } else {
+      const controls = `<div class="speech-controls">${output === 'text' ? '' : '<button id="speakButton">▶ Speak selected label</button>'}<button id="copyResult">Copy selected text</button></div>`;
+      showResult('Review selected label', `<strong id="recognizedLabel">${escapeHtml(selected)}</strong><br><br>Selected from the model’s candidate labels.`, 'USER REVIEW', controls);
+      document.querySelector('#speakButton')?.addEventListener('click', speakRecognizedLabel);
+      document.querySelector('#copyResult')?.addEventListener('click', copyRecognizedLabel);
+    }
+  }));
+}
+
+function speakRecognizedLabel() {
+  const label = document.querySelector('#recognizedLabel')?.textContent || '';
+  if (label && 'speechSynthesis' in window) { speechSynthesis.cancel(); speechSynthesis.speak(new SpeechSynthesisUtterance(label)); }
+}
+
+async function copyRecognizedLabel() {
+  const label = document.querySelector('#recognizedLabel')?.textContent || '';
+  if (label) await navigator.clipboard.writeText(label);
 }
 
 async function lookupSign(text) {

@@ -63,6 +63,28 @@ def classification_metrics(y, pred, n_classes):
     return {"accuracy": float(np.mean(y == pred)), "macro_f1": float(f1.mean()), "per_class_recall": recall.tolist(), "confusion_matrix": matrix}
 
 
+def calibrate_threshold(y, pred, probabilities, target_accuracy: float = 0.70, min_coverage: float = 0.10):
+    """Choose the widest in-vocabulary validation coverage meeting a precision-like accuracy target."""
+    confidence = probabilities.max(axis=1)
+    candidates = np.unique(np.r_[0.0, confidence])
+    points = []
+    for threshold in candidates:
+        accepted = confidence >= threshold
+        coverage = float(accepted.mean())
+        accuracy = float((y[accepted] == pred[accepted]).mean()) if accepted.any() else 0.0
+        points.append({"threshold": float(threshold), "coverage": coverage, "selective_accuracy": accuracy})
+    eligible = [point for point in points if point["coverage"] >= min_coverage and point["selective_accuracy"] >= target_accuracy]
+    if eligible:
+        chosen = max(eligible, key=lambda point: (point["coverage"], -point["threshold"]))
+        met_target = True
+    else:
+        # If validation cannot support the target, keep predictions reviewable
+        # rather than rejecting everything at an arbitrary confidence cutoff.
+        chosen = {"threshold": 0.0, "coverage": 1.0, "selective_accuracy": float(np.mean(y == pred))}
+        met_target = False
+    return chosen["threshold"], {**chosen, "target_accuracy": target_accuracy, "min_coverage": min_coverage, "target_met": met_target}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", type=Path, default=Path("data/processed/manifest.csv"))
@@ -134,8 +156,10 @@ def main() -> int:
     y, pred, probs, infer_time = scores(model, loaders["test"], device)
     test = classification_metrics(y, pred, len(classes))
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    torch.save({"state_dict": model.state_dict(), "classes": classes, "frames": args.frames, "input_size": 160, "threshold": 0.45, "validation_macro_f1": best_f1}, args.output)
-    report = {"dataset_manifest": str(args.manifest), "split_protocol": "signer-disjoint" if signer_disjoint else "random clip split; signer identity unavailable; results may be optimistic", "split_counts": {k: len(v) for k,v in splits.items()}, "signer_count": len(signer_splits), "seed": args.seed, "epochs_requested": args.epochs, "training_seconds": time.perf_counter()-started, "device": str(device), "torch": torch.__version__, "test_accuracy": test["accuracy"], "test_macro_f1": test["macro_f1"], "test_per_class_recall": dict(zip(classes,test["per_class_recall"])), "test_confusion_matrix": test["confusion_matrix"].tolist(), "mean_end_to_end_batch_latency_ms": infer_time*1000/max(1,len(loaders['test'])), "mean_clip_latency_ms": infer_time*1000/max(1,len(datasets['test'])), "latency_includes_video_decode": True, "model_artifact": str(args.output), "unknown_rejection_threshold": 0.45, "threshold_note": "Provisional threshold; no out-of-vocabulary sign examples exist to evaluate unknown rejection."}
+    val_y, val_pred, val_probs, _ = scores(model, loaders["validation"], device)
+    threshold, threshold_calibration = calibrate_threshold(val_y, val_pred, val_probs)
+    torch.save({"state_dict": model.state_dict(), "classes": classes, "frames": args.frames, "input_size": 160, "threshold": threshold, "threshold_calibration": threshold_calibration, "validation_augmentation": False, "validation_macro_f1": best_f1}, args.output)
+    report = {"dataset_manifest": str(args.manifest), "split_protocol": "signer-disjoint" if signer_disjoint else "random clip split; signer identity unavailable; results may be optimistic", "split_counts": {k: len(v) for k,v in splits.items()}, "signer_count": len(signer_splits), "seed": args.seed, "epochs_requested": args.epochs, "training_seconds": time.perf_counter()-started, "device": str(device), "torch": torch.__version__, "test_accuracy": test["accuracy"], "test_macro_f1": test["macro_f1"], "test_per_class_recall": dict(zip(classes,test["per_class_recall"])), "test_confusion_matrix": test["confusion_matrix"].tolist(), "mean_end_to_end_batch_latency_ms": infer_time*1000/max(1,len(loaders['test'])), "mean_clip_latency_ms": infer_time*1000/max(1,len(datasets['test'])), "latency_includes_video_decode": True, "model_artifact": str(args.output), "unknown_rejection_threshold": threshold, "threshold_calibration": threshold_calibration, "threshold_note": "Calibrated on in-vocabulary validation clips only; unknown-sign rejection remains untested."}
     report_path = args.output.with_suffix(".metrics.json")
     report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(json.dumps({"test_accuracy": test["accuracy"], "test_macro_f1": test["macro_f1"], "mean_clip_latency_ms": report["mean_clip_latency_ms"], "artifact": str(args.output), "metrics": str(report_path)}, indent=2))

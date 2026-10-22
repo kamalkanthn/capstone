@@ -12,7 +12,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from isl_communication.recognition.model import MobileNetGRU
-from train import VideoDataset, classification_metrics, scores
+from train import VideoDataset, calibrate_threshold, classification_metrics, scores
 
 
 def main() -> int:
@@ -23,7 +23,10 @@ def main() -> int:
     parser.add_argument("--split", choices=("validation", "test"), default="test")
     parser.add_argument("--output", type=Path, default=Path("models/isl_mobilenet_gru.clean_test.metrics.json"))
     parser.add_argument("--batch-size", type=int, default=4)
+    parser.add_argument("--calibrate-threshold", action="store_true", help="Calibrate and save the checkpoint threshold using the validation split")
     args = parser.parse_args()
+    if args.calibrate_threshold and args.split != "validation":
+        raise SystemExit("Threshold calibration requires --split validation")
 
     checkpoint = torch.load(args.checkpoint, map_location="cpu", weights_only=True)
     with args.manifest.open("r", encoding="utf-8-sig", newline="") as file:
@@ -40,8 +43,16 @@ def main() -> int:
     model = MobileNetGRU(len(classes), pretrained=False)
     model.load_state_dict(checkpoint["state_dict"])
     model.to(device).eval()
-    y, pred, _, elapsed = scores(model, loader, device)
+    y, pred, probabilities, elapsed = scores(model, loader, device)
     metrics = classification_metrics(y, pred, len(classes))
+    threshold = float(checkpoint.get("threshold", 1.01))
+    calibration = None
+    if args.calibrate_threshold:
+        threshold, calibration = calibrate_threshold(y, pred, probabilities)
+        checkpoint["threshold"] = threshold
+        checkpoint["threshold_calibration"] = calibration
+        torch.save(checkpoint, args.checkpoint)
+    accepted = probabilities.max(axis=1) >= threshold
     report = {
         "evaluation_split": args.split,
         "split_protocol": "random clip split; signer metadata unavailable; results may be optimistic",
@@ -50,6 +61,11 @@ def main() -> int:
         "augmentation": False,
         "accuracy": metrics["accuracy"],
         "macro_f1": metrics["macro_f1"],
+        "confidence_threshold": threshold,
+        "threshold_calibration": calibration or checkpoint.get("threshold_calibration"),
+        "in_vocabulary_coverage_at_threshold": float(accepted.mean()),
+        "selective_accuracy_at_threshold": float((y[accepted] == pred[accepted]).mean()) if accepted.any() else None,
+        "threshold_note": "Measured only on in-vocabulary clips; this does not establish out-of-vocabulary sign rejection.",
         "per_class_recall": dict(zip(classes, metrics["per_class_recall"])),
         "confusion_matrix": metrics["confusion_matrix"].tolist(),
         "mean_end_to_end_batch_latency_ms": elapsed * 1000 / max(1, len(loader)),

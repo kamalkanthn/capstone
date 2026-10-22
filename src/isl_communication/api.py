@@ -142,9 +142,14 @@ async def predict(video: UploadFile = File(...)) -> dict:
         confidence, index = scores.max(dim=0)
         score = float(confidence.cpu())
         threshold = float(checkpoint.get("threshold", 1.01))
+        top_scores, top_indices = torch.topk(scores, k=min(3, len(checkpoint["classes"])))
+        alternatives = [
+            {"label": checkpoint["classes"][int(class_index)], "confidence": float(value.cpu())}
+            for value, class_index in zip(top_scores, top_indices)
+        ]
         if score < threshold:
-            return {"accepted": False, "label": None, "confidence": score, "threshold": threshold, "latency_ms": elapsed, "message": "Low confidence: please review or record the sign again."}
-        return {"accepted": True, "label": checkpoint["classes"][int(index)], "confidence": score, "threshold": threshold, "latency_ms": elapsed, "message": "Isolated vocabulary prediction. This is not continuous sentence translation."}
+            return {"accepted": False, "label": None, "alternatives": alternatives, "confidence": score, "threshold": threshold, "latency_ms": elapsed, "message": "Low confidence: please review the candidate labels or record the sign again."}
+        return {"accepted": True, "label": checkpoint["classes"][int(index)], "alternatives": alternatives, "confidence": score, "threshold": threshold, "latency_ms": elapsed, "message": "Isolated vocabulary prediction. This is not continuous sentence translation."}
     except HTTPException:
         raise
     except Exception as error:

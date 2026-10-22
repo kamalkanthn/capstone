@@ -9,9 +9,11 @@ This is an actively developed local prototype for **isolated dynamic Indian Sign
 - A preparation script that builds a deterministic, class-stratified manifest from the downloaded Amrita archive.
 - A train/evaluation pipeline that reports accuracy, macro-F1, per-class recall, confusion matrix, and model timing.
 
-The current archive has **978 clips in 49 labeled folders**. The source record reports 50 classes and 7 signers, but the downloaded archive has no signer metadata and one fewer class folder. The prepared split is therefore clip-level and may place the same signer in more than one split. It must not be cited as signer-independent evaluation. No trained checkpoint is shipped until training completes.
+The current archive has **978 clips in 49 labeled folders**. The source record reports 50 classes and 7 signers, but the downloaded archive has no signer metadata and one fewer class folder. The prepared split is therefore clip-level and may place the same signer in more than one split. It must not be cited as signer-independent evaluation. The trained checkpoint stays local and is ignored by Git; the training code and measured reports are committed.
 
 The text-to-sign path only looks up one exact vocabulary word and plays a recorded example. It does not create a sign animation, sequence words into an ISL sentence, or translate English grammar into ISL. Audio-to-sign and ASR remain unimplemented. These unsupported routes are labeled in the UI.
+
+The initial clip-split baseline scores 54.4% test accuracy and 0.524 macro-F1 on 49 labels. At its validation-calibrated threshold, about 32% of test clips are accepted at 78.7% selective accuracy. These exploratory results may be optimistic because signer identity is unavailable; one end-to-end test was accepted with an incorrect label. See [`docs/BASELINE_EXPERIMENT.md`](docs/BASELINE_EXPERIMENT.md).
 
 ## Run locally
 

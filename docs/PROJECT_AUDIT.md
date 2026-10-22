@@ -16,7 +16,7 @@ The workspace contains research PDFs and reports, a 12-slide panel deck, additio
 | Video preprocessing | Ordered fixed-length RGB frame sampler; a real archive clip decoded to a finite 12×3×160×160 tensor. |
 | Data | Amrita SLR v1 archive downloaded and extracted locally. Inventory found 978 videos in 49 numbered class folders, with no signer metadata in the archive. Source record reports 50 signs and 7 signers; one class discrepancy remains unresolved. |
 | Manifest | `scripts/prepare_amrita.py` creates reproducible per-class clip-stratified train/validation/test splits. `scripts/validate_dataset.py` passed against all 978 files. This is not a signer-independent protocol. |
-| Model | MobileNetV3-Small visual encoder with bidirectional GRU temporal head. GPU-enabled PyTorch 2.14.1+cu130 detects the local RTX 3050. Training is underway; no accuracy claim is established until it finishes. |
+| Model | MobileNetV3-Small visual encoder with bidirectional GRU temporal head. Trained locally on the RTX 3050; clean unaugmented clip-level test: 54.4% accuracy, 0.524 macro-F1, 194 ms mean decode-plus-model latency per clip. |
 | Inference API | FastAPI video upload prediction, health endpoint, and exact one-word recorded clip lookup. Local Node server starts the API when `.venv` is present after server restart. |
 | Text to sign | Exact one-word lookup of a recorded dataset clip. No sentence planning, grammar conversion, generated animation, or avatar. |
 | Speech/audio | Browser TTS for typed text and spoken recognized labels. ASR and audio-to-sign are absent. |
@@ -31,7 +31,10 @@ The workspace contains research PDFs and reports, a 12-slide panel deck, additio
 - Node syntax checks passed for the browser application and local server.
 - Decoded one dataset clip to 12 ordered RGB frames at 160×160; all tensor values were finite.
 - Generated and validated a 978-row manifest with 49 labels and train/validation/test counts 684/147/147.
-- Full baseline model experiment is currently in progress; report metrics only from its saved experiment report.
+- Trained 20 epochs on CUDA; the selected checkpoint was the final epoch. Clean validation: 53.1% accuracy and 0.525 macro-F1; clean test: 54.4% accuracy and 0.524 macro-F1.
+- Calibrated a 0.488 confidence threshold on validation; test coverage at that threshold was 32.0% with 78.7% accuracy among accepted in-vocabulary clips. Unknown-sign rejection was not evaluated.
+- Sent held-out videos through the local API. At least one accepted prediction was incorrect; the UI now presents top-three labels for human review.
+- Random brightness scaling was active in validation/test during the initial training run. Final validation/test metrics were recomputed without augmentation. Checkpoint selection may still be affected; the current training code applies augmentation only to training clips.
 
 ## Required limitations
 
