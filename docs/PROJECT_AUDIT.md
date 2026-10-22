@@ -4,7 +4,7 @@ Audit date: 2026-10-22. Scope: files present in the supplied `CAPSTONE` workspac
 
 ## Repository state
 
-At the initial audit, this directory was not a Git repository: no `.git` directory existed. In the subsequent implementation step, a local Git repository was initialized on `main` and a source-only initial commit was created. No GitHub remote exists yet; GitHub publication has not been verified. Original presentation and research binaries remain outside the staged source project. No prior history was present to preserve or reset.
+At the initial audit, this directory was not a Git repository: no `.git` directory existed. In the subsequent implementation step, a local Git repository was initialized on `main`, a source-only initial commit was created, and it was pushed to the private GitHub repository [`kamalkanthn/capstone`](https://github.com/kamalkanthn/capstone). The remote page was refreshed and verified to show the `main` branch, README, project folders, and initial commit. Original presentation and research binaries remain outside the source repository. No prior history was present to preserve or reset.
 
 ## What exists
 

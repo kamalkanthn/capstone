@@ -6,11 +6,11 @@ University capstone research workspace for dynamic Indian Sign Language recognit
 
 - **Implemented and inspected:** research/presentation materials; project audit, architecture, research gap map, decisions, and model comparison.
 - **Implemented, not yet runtime-verified:** manifest validation and ordered video frame sampling utilities in `scripts/`.
-- **Planned:** trained recognition model, camera application, speech/translation, text/audio-to-sign, and unified interface.
+- **Planned:** trained recognition model, video interpretation, ASR, translation, and verified sign generation.
 
 - **Local website:** implemented as a no-dependency Node.js web app in `web/`; local media preview and browser text-to-speech are available. Recognition/ASR/translation/sign generation are visibly marked unavailable until implemented.
 
-This workspace currently has no application model, dataset, or trained weights. A local Git repository is initialized; a GitHub remote has not yet been created. Do not interpret literature metrics as project results.
+This workspace currently has no application model, dataset, or trained weights. The private GitHub repository is [`kamalkanthn/capstone`](https://github.com/kamalkanthn/capstone). Do not interpret literature metrics as project results.
 
 ## Setup
 
