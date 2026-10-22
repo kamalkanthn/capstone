@@ -1,41 +1,38 @@
 # Project audit
 
-Audit date: 2026-10-22. Scope: files present in the supplied `CAPSTONE` workspace.
+Audit date: 2026-10-22. This records the original workspace audit and the current implementation checkpoint.
 
-## Repository state
+## Repository and source materials
 
-At the initial audit, this directory was not a Git repository: no `.git` directory existed. In the subsequent implementation step, a local Git repository was initialized on `main`, a source-only initial commit was created, and it was pushed to the private GitHub repository [`kamalkanthn/capstone`](https://github.com/kamalkanthn/capstone). The remote page was refreshed and verified to show the `main` branch, README, project folders, and initial commit. Original presentation and research binaries remain outside the source repository. No prior history was present to preserve or reset.
+The supplied workspace initially had no Git repository. A source-only Git repository was subsequently initialized on `main` and pushed to the private GitHub repository [`kamalkanthn/capstone`](https://github.com/kamalkanthn/capstone). Research and presentation binaries remain in the local workspace and are not part of the source-only Git history.
 
-## What exists
+The workspace contains research PDFs and reports, a 12-slide panel deck, additional presentation variants, and the project source. The panel deck describes SSTAN as a candidate direction; it is not implemented here. Literature results, particularly ASL/WLASL results, are not project results and do not establish ISL performance.
 
-- Research/reference material: ten PDFs under `research papers/`, `ISL_Research_Notes.pdf`, `Two_Paper_Deep_Research_Report_Sign_Language_Recognition.docx`, and `Deep Research Backing Conversation for session None.docx`.
-- Presentation material: `SLR_Panel_Presentation.pptx`, multiple variants under `presentation/` and `ppts/`, and the root `capstone (1).pptx`.
-- The panel deck contains 12 slides. It states that research groundwork, eight-paper review, gap identification, and a shortlist were completed; implementation and evaluation are planned. It names SSTAN as the base-paper direction, not as an implemented model.
+## Current implementation state
 
-## What works / incomplete / absent
-
-| Area | Observed state |
+| Area | State and evidence |
 |---|---|
-| Research and scope | Reference papers, notes, reports, and decks exist. Their claims and citations still need cross-checking against primary sources. |
-| Application source | No Python/JavaScript/application source files found. |
-| Dependency/configuration | No `pyproject.toml`, requirements file, environment file, or experiment configuration found. |
-| Dataset | No video/audio corpus, manifest, split metadata, license record, or dataset card found. |
-| Model/training | No trained model, checkpoint, training/evaluation code, or measured results found. |
-| User interface / I/O | A local browser interface now previews video/audio, captures browser camera/microphone media, and uses built-in browser TTS for typed text. Recognition, ASR, translation, and ISL sign generation remain absent. |
-| Tests / CI | A GitHub Actions source syntax workflow was added; it has not run on GitHub. |
-| Runtime verification | Node.js is available; local web app starts and basic text-to-speech route renders. Python is unavailable in this environment, so Python utilities remain unverified. |
+| Local website | Node.js server on loopback; browser video/audio preview, camera recording, typed text, and built-in browser speech. |
+| Video preprocessing | Ordered fixed-length RGB frame sampler; a real archive clip decoded to a finite 12×3×160×160 tensor. |
+| Data | Amrita SLR v1 archive downloaded and extracted locally. Inventory found 978 videos in 49 numbered class folders, with no signer metadata in the archive. Source record reports 50 signs and 7 signers; one class discrepancy remains unresolved. |
+| Manifest | `scripts/prepare_amrita.py` creates reproducible per-class clip-stratified train/validation/test splits. `scripts/validate_dataset.py` passed against all 978 files. This is not a signer-independent protocol. |
+| Model | MobileNetV3-Small visual encoder with bidirectional GRU temporal head. GPU-enabled PyTorch 2.14.1+cu130 detects the local RTX 3050. Training is underway; no accuracy claim is established until it finishes. |
+| Inference API | FastAPI video upload prediction, health endpoint, and exact one-word recorded clip lookup. Local Node server starts the API when `.venv` is present after server restart. |
+| Text to sign | Exact one-word lookup of a recorded dataset clip. No sentence planning, grammar conversion, generated animation, or avatar. |
+| Speech/audio | Browser TTS for typed text and spoken recognized labels. ASR and audio-to-sign are absent. |
+| Generalization | Signer IDs are unavailable in the archive. The pilot split is clip-level, so test signers may occur in train. Unknown-sign rejection is not calibrated with out-of-vocabulary clips. |
+| CI and repo | GitHub repository exists. CI is configured but has not been reported as passing on GitHub. |
 
-“Works” here means the research files are present and the panel presentation can be read. No runnable software feature was found.
+## Verification performed
 
-## Panel deck scope and gaps
+- Installed and imported PyTorch, torchvision, OpenCV, FastAPI, and the local application package.
+- Confirmed CUDA availability and detected NVIDIA GeForce RTX 3050 6GB Laptop GPU.
+- Python bytecode compilation passed for preparation, training, API, model, and vision modules.
+- Node syntax checks passed for the browser application and local server.
+- Decoded one dataset clip to 12 ordered RGB frames at 160×160; all tensor values were finite.
+- Generated and validated a 978-row manifest with 49 labels and train/validation/test counts 684/147/147.
+- Full baseline model experiment is currently in progress; report metrics only from its saved experiment report.
 
-The deck's stated central question is accurate, efficient, robust recognition of dynamic signs under real-world conditions. Its four gap groups are data, model, real-world robustness, and deployment; it identifies continuous recognition, signer/environment generalization, variable signing speed, and compute cost. It lists Random Forest/LSTM/CNN/3D-CNN/Transformer/MobileNetV2/distillation candidates in the supplied task brief, while the deck compares SSTAN, multimodal 3D-ResNet+Transformer/CTC, and MobileNetV2+attention-LSTM. None is implemented in this workspace.
+## Required limitations
 
-The deck reports results from different datasets and tasks side by side. In particular, WLASL is ASL and cannot establish ISL performance. SSTAN's reported WLASL/JSL/KSL results likewise do not establish performance on ISL. These values are literature context only, not project results or directly comparable rankings.
-
-## Immediate findings
-
-1. The workspace is a research bundle rather than an existing software repository.
-2. No dataset/model is present, so training, accuracy, signer-independent evaluation, and latency claims are not possible.
-3. A generic video sampling and manifest validation utility is the first useful implementation step; dataset selection and license review remain explicit gates before data acquisition.
-4. The project needs a Git repository/remote setup to meet the GitHub source-of-truth requirement. This audit does not claim that such a repository exists.
+The present classifier handles **one isolated sign per clip**. It does not recognize continuous sentence streams or sign boundaries, generate fluent English, or establish signer-independent performance. The output clip lookup is a vocabulary demonstration only. ASR, speech-to-sign, regional-language translation, and animated/avatar sign generation remain future work.

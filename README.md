@@ -1,57 +1,52 @@
-# AI-Driven Real-Time Bidirectional ISL Communication
+# AI-Driven Bidirectional ISL Communication (capstone)
 
-University capstone research workspace for dynamic Indian Sign Language recognition and a longer-term bidirectional communication application.
+This is an actively developed local prototype for **isolated dynamic Indian Sign Language vocabulary recognition**. It samples ordered video frames and uses a MobileNetV3 frame encoder with a bidirectional GRU temporal head. It is not yet a continuous sentence translator.
 
-## Current status
+## What works today
 
-- **Implemented and inspected:** research/presentation materials; project audit, architecture, research gap map, decisions, and model comparison.
-- **Implemented, not yet runtime-verified:** manifest validation and ordered video frame sampling utilities in `scripts/`.
-- **Planned:** trained recognition model, video interpretation, ASR, translation, and verified sign generation.
+- A local browser interface for video upload, camera recording, typed text, and browser text-to-speech.
+- A local FastAPI service with video inference and exact one-word recorded sign-clip lookup.
+- A preparation script that builds a deterministic, class-stratified manifest from the downloaded Amrita archive.
+- A train/evaluation pipeline that reports accuracy, macro-F1, per-class recall, confusion matrix, and model timing.
 
-- **Local website:** implemented as a no-dependency Node.js web app in `web/`; local media preview and browser text-to-speech are available. Recognition/ASR/translation/sign generation are visibly marked unavailable until implemented.
+The current archive has **978 clips in 49 labeled folders**. The source record reports 50 classes and 7 signers, but the downloaded archive has no signer metadata and one fewer class folder. The prepared split is therefore clip-level and may place the same signer in more than one split. It must not be cited as signer-independent evaluation. No trained checkpoint is shipped until training completes.
 
-This workspace currently has no application model, dataset, or trained weights. The private GitHub repository is [`kamalkanthn/capstone`](https://github.com/kamalkanthn/capstone). Do not interpret literature metrics as project results.
+The text-to-sign path only looks up one exact vocabulary word and plays a recorded example. It does not create a sign animation, sequence words into an ISL sentence, or translate English grammar into ISL. Audio-to-sign and ASR remain unimplemented. These unsupported routes are labeled in the UI.
 
-## Setup
+## Run locally
 
-### Run the local website
-
-From the repository root:
+The project includes a Python virtual environment in this local checkout. From the project root:
 
 ```powershell
 cd web
 node server.mjs
 ```
 
-Open <http://127.0.0.1:4173>. The server binds to loopback only. No external service or dataset is required for the interface demo. Camera and microphone previews require browser permission. The page may fetch optional fonts from Google Fonts; it falls back to local system fonts when offline. `web/package.json` also defines an `npm run dev` script for environments with npm installed.
+Open <http://127.0.0.1:4173>. When `.venv` is present, the Node server also starts the local API on `127.0.0.1:4174`. Camera recording requires browser permission. Keep both terminal processes alive while using the app. The API reports “model setup needed” until a checkpoint is trained.
 
-### Data utilities
+## Reproduce the pilot
 
-Python 3.10+ is recommended. Install video preprocessing dependencies:
-
-```powershell
-python -m pip install opencv-python numpy
-```
-
-The manifest validator uses only the Python standard library. It expects `video_path,label,split` columns and an optional `signer_id` column:
+Install package dependencies if setting up a fresh checkout (Python 3.12+ recommended):
 
 ```powershell
-python scripts/validate_dataset.py DATASET_ROOT DATASET_ROOT/metadata.csv
+python -m venv .venv
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+.venv\Scripts\python.exe -m pip install -e .
 ```
 
-Sample ordered frames at 8 FPS into 224×224 RGB arrays (source aspect ratio preserved with letterboxing):
+Download the Amrita SLR Real-Time ISL v1 archive from its [Mendeley Data record](https://data.mendeley.com/datasets/dtg9s785v8/1), extract its video folders into `data/raw/extracted`, then run:
 
 ```powershell
-python scripts/preprocess_video.py path/to/clip.mp4 data/processed/clip.npy --fps 8 --size 224
+.venv\Scripts\python.exe scripts/prepare_amrita.py
+.venv\Scripts\python.exe scripts/validate_dataset.py data/raw/extracted data/processed/manifest.csv
+.venv\Scripts\python.exe scripts/train.py --manifest data/processed/manifest.csv --data-root data/raw/extracted --epochs 20
 ```
 
-The command writes a JSON sidecar with sampling timestamps. Sampling uses OpenCV's reported presentation timestamps; validate behavior on the selected codec and variable-frame-rate media before relying on precise temporal alignment.
+The training script downloads pretrained MobileNet weights on first use. For an NVIDIA GPU, install the matching CUDA build of PyTorch from the official [PyTorch install selector](https://pytorch.org/get-started/locally/). The installed model artifact is intentionally gitignored; the code and reproducible instructions are committed.
 
-## Data
+Raw videos, generated manifests, checkpoints, and experiment outputs stay out of Git. The source record identifies the dataset as CC BY 4.0; retain dataset attribution and review the archive terms before redistribution. See [`docs/DATASET_CARD.md`](docs/DATASET_CARD.md).
 
-No media is included. The provisional pilot candidate is documented in [`docs/DATASET_CARD.md`](docs/DATASET_CARD.md). Check attribution, license, archive contents, signer metadata and guide approval before acquisition. Keep raw videos outside ordinary Git history.
-
-## Research and implementation
+## Project documentation
 
 - [Project audit](docs/PROJECT_AUDIT.md)
 - [Architecture](docs/ARCHITECTURE.md)
@@ -60,6 +55,6 @@ No media is included. The provisional pilot candidate is documented in [`docs/DA
 - [Implementation roadmap](docs/IMPLEMENTATION_ROADMAP.md)
 - [Decisions](docs/DECISIONS.md)
 
-## Limitations
+## Scope and limitations
 
-The first intended recognition task is isolated dynamic sign classification. Continuous recognition requires sequence annotations and sequence metrics; no such project data or implementation exists yet. ASL results on WLASL do not establish ISL performance. Sign lookup, if added, will be labeled as a constrained vocabulary/phrase demonstration rather than general English-to-ISL translation.
+The prototype recognizes one isolated sign per clip. It does not decode continuous signing, model sign boundaries/co-articulation, provide a calibrated open-set unknown-sign detector, or guarantee generalization to unseen signers. Text-to-sign is a word lookup from an attributed recorded dataset clip. It is not sentence translation or an avatar. ASR, speech-to-sign, regional-language translation, and generated animation are not implemented.
