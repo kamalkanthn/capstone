@@ -1,0 +1,25 @@
+# Local data and derived media; keep only manifests and documentation in Git.
+data/raw/
+data/external/
+data/processed/
+data/interim/
+
+# Model artifacts and runtime outputs
+models/*.pt
+models/*.pth
+models/*.onnx
+models/*.tflite
+outputs/
+runs/
+
+# Python tooling
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local secrets
+.env
