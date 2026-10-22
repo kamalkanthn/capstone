@@ -2,8 +2,8 @@
 
 The released archive contains class folders and video filenames but no signer
 metadata. This script therefore offers an explicitly clip-stratified pilot split;
-it never invents signer IDs. Supply reviewed signer labels separately before
-using --split-strategy signer.
+it never invents signer IDs. Use a separately reviewed signer-labeled manifest
+with train.py --require-signer-disjoint for signer-independent evaluation.
 """
 
 from __future__ import annotations

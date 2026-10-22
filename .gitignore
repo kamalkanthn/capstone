@@ -9,6 +9,7 @@ models/*.pt
 models/*.pth
 models/*.onnx
 models/*.tflite
+models/*.metrics.json
 outputs/
 runs/
 

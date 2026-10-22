@@ -90,7 +90,14 @@ def sign_example(text: str) -> dict:
         raise HTTPException(status_code=400, detail="Manifest video path is outside the dataset root.")
     if not path.is_file():
         raise HTTPException(status_code=404, detail="The recorded sign clip is missing from local data.")
-    return {"label": row["label"], "video_url": f"/api/sign-asset?video_path={row['video_path']}", "kind": "recorded isolated vocabulary example", "translation": False}
+    return {
+        "label": row["label"],
+        "video_url": f"/api/sign-asset?video_path={row['video_path']}",
+        "kind": "recorded isolated vocabulary example",
+        "translation": False,
+        "attribution": "Sasidharan et al. (2025), Amrita SLR- Real Time ISL Dataset, Mendeley Data v1, CC BY 4.0, DOI 10.17632/dtg9s785v8.1",
+        "source_url": "https://doi.org/10.17632/dtg9s785v8.1",
+    }
 
 
 @app.get("/api/sign-asset")
@@ -102,7 +109,12 @@ def sign_asset(video_path: str) -> FileResponse:
         raise HTTPException(status_code=400, detail="Invalid asset path.")
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Sign video asset not found.")
-    return FileResponse(path, media_type=mimetypes.guess_type(path.name)[0] or "application/octet-stream", filename=path.name)
+    return FileResponse(
+        path,
+        media_type=mimetypes.guess_type(path.name)[0] or "application/octet-stream",
+        filename=path.name,
+        content_disposition_type="inline",
+    )
 
 
 @app.post("/api/predict")

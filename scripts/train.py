@@ -24,8 +24,8 @@ from isl_communication.vision.clip import decode_clip
 
 
 class VideoDataset(Dataset):
-    def __init__(self, rows: list[dict[str, str]], root: Path, labels: dict[str, int], frames: int):
-        self.rows, self.root, self.labels, self.frames = rows, root, labels, frames
+    def __init__(self, rows: list[dict[str, str]], root: Path, labels: dict[str, int], frames: int, augment: bool = False):
+        self.rows, self.root, self.labels, self.frames, self.augment = rows, root, labels, frames, augment
 
     def __len__(self) -> int:
         return len(self.rows)
@@ -33,7 +33,7 @@ class VideoDataset(Dataset):
     def __getitem__(self, index: int):
         row = self.rows[index]
         clip = decode_clip(self.root / row["video_path"], self.frames)
-        if random.random() < 0.5:
+        if self.augment and random.random() < 0.5:
             clip = clip * random.uniform(0.85, 1.15)
         return clip, self.labels[row["label"]]
 
@@ -99,7 +99,7 @@ def main() -> int:
     signer_disjoint = bool(signer_splits) and all(row["signer_id"] for row in rows)
     classes = sorted({row["label"] for row in rows})
     label_to_id = {label: index for index, label in enumerate(classes)}
-    datasets = {key: VideoDataset(value, args.data_root, label_to_id, args.frames) for key, value in splits.items()}
+    datasets = {key: VideoDataset(value, args.data_root, label_to_id, args.frames, augment=key == "train") for key, value in splits.items()}
     loaders = {key: DataLoader(value, batch_size=args.batch_size, shuffle=key == "train", num_workers=0) for key, value in datasets.items()}
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}; classes={len(classes)}; split_counts={ {k:len(v) for k,v in splits.items()} }; signers={len(signer_splits)}")
@@ -135,7 +135,7 @@ def main() -> int:
     test = classification_metrics(y, pred, len(classes))
     args.output.parent.mkdir(parents=True, exist_ok=True)
     torch.save({"state_dict": model.state_dict(), "classes": classes, "frames": args.frames, "input_size": 160, "threshold": 0.45, "validation_macro_f1": best_f1}, args.output)
-    report = {"dataset_manifest": str(args.manifest), "split_protocol": "signer-disjoint" if signer_disjoint else "random clip split; signer identity unavailable; results may be optimistic", "split_counts": {k: len(v) for k,v in splits.items()}, "signer_count": len(signer_splits), "seed": args.seed, "epochs_requested": args.epochs, "training_seconds": time.perf_counter()-started, "device": str(device), "torch": torch.__version__, "test_accuracy": test["accuracy"], "test_macro_f1": test["macro_f1"], "test_per_class_recall": dict(zip(classes,test["per_class_recall"])), "test_confusion_matrix": test["confusion_matrix"].tolist(), "mean_model_batch_latency_ms": infer_time*1000/max(1,len(loaders['test'])), "mean_clip_latency_ms": infer_time*1000/max(1,len(datasets['test'])), "model_artifact": str(args.output), "unknown_rejection_threshold": 0.45, "threshold_note": "Provisional threshold; no out-of-vocabulary sign examples exist to evaluate unknown rejection."}
+    report = {"dataset_manifest": str(args.manifest), "split_protocol": "signer-disjoint" if signer_disjoint else "random clip split; signer identity unavailable; results may be optimistic", "split_counts": {k: len(v) for k,v in splits.items()}, "signer_count": len(signer_splits), "seed": args.seed, "epochs_requested": args.epochs, "training_seconds": time.perf_counter()-started, "device": str(device), "torch": torch.__version__, "test_accuracy": test["accuracy"], "test_macro_f1": test["macro_f1"], "test_per_class_recall": dict(zip(classes,test["per_class_recall"])), "test_confusion_matrix": test["confusion_matrix"].tolist(), "mean_end_to_end_batch_latency_ms": infer_time*1000/max(1,len(loaders['test'])), "mean_clip_latency_ms": infer_time*1000/max(1,len(datasets['test'])), "latency_includes_video_decode": True, "model_artifact": str(args.output), "unknown_rejection_threshold": 0.45, "threshold_note": "Provisional threshold; no out-of-vocabulary sign examples exist to evaluate unknown rejection."}
     report_path = args.output.with_suffix(".metrics.json")
     report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(json.dumps({"test_accuracy": test["accuracy"], "test_macro_f1": test["macro_f1"], "mean_clip_latency_ms": report["mean_clip_latency_ms"], "artifact": str(args.output), "metrics": str(report_path)}, indent=2))

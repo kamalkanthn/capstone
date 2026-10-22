@@ -1,6 +1,6 @@
 # Architecture
 
-Status: proposed design; no integrated application is implemented yet.
+Status: local prototype implemented for isolated video-to-label, label-to-speech, and exact recorded sign-label lookup. Continuous, language-level, and avatar paths remain future architecture.
 
 ## System overview
 
@@ -10,10 +10,10 @@ Select a pipeline from input and output modes. Keep visual recognition, speech r
 flowchart LR
   UI[Mode and I/O selection] --> R{Pipeline router}
   V[Camera or video file] --> VS[Frame sampling and visual preprocessing]
-  VS --> VF[Hand, body, optional face and RGB features]
-  VF --> SR[Dynamic recognition]
-  SR --> SD[Sequence decoding and confidence/rejection]
-  SD --> TXT[Text result]
+  VS --> VF[Ordered RGB frames]
+  VF --> SR[MobileNetV3 frame encoder + bidirectional GRU]
+  SR --> SD[Isolated-label confidence/review]
+  SD --> TXT[Single vocabulary label]
   A[Microphone or audio file] --> ASR[Speech recognition]
   ASR --> N[Text normalization and sentence analysis]
   T[Typed text] --> N
@@ -47,4 +47,4 @@ Raw participant media stays outside ordinary Git history. Logging records techni
 
 ## Model interfaces
 
-Initial recognition should be an isolated-sign sequence classifier until an appropriately annotated continuous ISL dataset is available. Keep RGB and landmark features separable so the baseline can test a lightweight temporal model and later compare visual features. The selected initial candidates and evidence limits are in `MODEL_SELECTION.md`.
+The implemented baseline is an isolated-sign clip classifier: MobileNetV3-Small extracts per-frame RGB features, then a bidirectional GRU models frame order. It samples a fixed 12-frame clip. The local archive lacks signer IDs, so the generated manifest uses clip-level splits and cannot substantiate signer-independent performance. Continuous decoding, landmarks, grammatical text processing, ASR, translation, and avatar generation remain future work. The selected candidates and evidence limits are in `MODEL_SELECTION.md`.

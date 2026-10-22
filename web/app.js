@@ -57,7 +57,7 @@ const routeMessages = {
   'microphone:both': 'Microphone capture can be previewed only after permission. Speech transcription is not connected yet.',
   'text:text': 'Typed text is ready to display. No translation is performed.',
   'text:speech': 'Type a message and use your browser’s installed speech voice to hear it.',
-  'text:sign': 'Look up one recorded sign example by exact vocabulary word. Sentence-to-ISL translation is not implemented.',
+  'text:sign': 'Look up one recorded sign example by an exact dataset label. Sentence-to-ISL translation is not implemented.',
   'text:both': 'Typed text can be displayed and spoken with a browser voice. No sign translation is performed.'
 };
 
@@ -250,7 +250,7 @@ async function lookupSign(text) {
     const payload = await response.json();
     if (!response.ok) throw new Error(typeof payload.detail === 'string' ? payload.detail : payload.detail?.message || JSON.stringify(payload.detail));
     const videoUrl = `${API}${payload.video_url}`;
-    showResult('Sign video example', `<strong>${escapeHtml(payload.label)}</strong><br><br>This plays one recorded vocabulary example. It is a word lookup, not sentence-to-ISL translation.<div class="sign-output-video"><video controls playsinline src="${escapeHtml(videoUrl)}"></video></div>`, 'WORD LOOKUP');
+    showResult('Sign video example', `<strong>${escapeHtml(payload.label)}</strong><br><br>This plays one recorded vocabulary example. It is a label lookup, not sentence-to-ISL translation.<div class="sign-output-video"><video controls playsinline src="${escapeHtml(videoUrl)}"></video></div><small>Footage: <a href="${escapeHtml(payload.source_url)}" target="_blank" rel="noreferrer">${escapeHtml(payload.attribution)}</a></small>`, 'WORD LOOKUP');
   } catch (error) {
     showResult('No sign video available', `${escapeHtml(error.message)}<br><br>Enter one exact dataset sign label.`, 'UNAVAILABLE');
   }
