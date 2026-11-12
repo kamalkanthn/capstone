@@ -18,23 +18,58 @@ import numpy as np
 import torch
 from torch import nn
 from torch.utils.data import DataLoader, Dataset
+from torchvision.transforms import functional as TF
 
 from isl_communication.recognition.model import MobileNetGRU
-from isl_communication.vision.clip import decode_clip
+from isl_communication.vision.clip import MEAN, STD, decode_clip
 
 
 class VideoDataset(Dataset):
     def __init__(self, rows: list[dict[str, str]], root: Path, labels: dict[str, int], frames: int, augment: bool = False):
         self.rows, self.root, self.labels, self.frames, self.augment = rows, root, labels, frames, augment
+        # Video decoding is the slow part of this small dataset. Cache uint8
+        # frames so later epochs reuse the same decode without storing float
+        # tensors (roughly 0.9 MB per 12-frame clip at the default resolution).
+        self.clip_cache: dict[int, torch.Tensor] = {}
 
     def __len__(self) -> int:
         return len(self.rows)
 
     def __getitem__(self, index: int):
         row = self.rows[index]
-        clip = decode_clip(self.root / row["video_path"], self.frames)
-        if self.augment and random.random() < 0.5:
-            clip = clip * random.uniform(0.85, 1.15)
+        if index not in self.clip_cache:
+            decoded = decode_clip(self.root / row["video_path"], self.frames)
+            rgb_u8 = ((decoded * STD + MEAN).clamp(0, 1) * 255).round().to(torch.uint8)
+            self.clip_cache[index] = rgb_u8.contiguous()
+        rgb = self.clip_cache[index].float().div_(255)
+        clip = (rgb - MEAN) / STD
+        if self.augment and random.random() < 0.8:
+            # Apply identical geometry and color changes to every frame so the
+            # clip keeps its motion cues while becoming less camera-specific.
+            rgb = (clip * STD + MEAN).clamp(0, 1)
+            angle = random.uniform(-3.0, 3.0)
+            scale = random.uniform(0.95, 1.05)
+            translate = [
+                int(random.uniform(-0.04, 0.04) * rgb.shape[-1]),
+                int(random.uniform(-0.04, 0.04) * rgb.shape[-2]),
+            ]
+            brightness = random.uniform(0.90, 1.10)
+            contrast = random.uniform(0.90, 1.10)
+            saturation = random.uniform(0.92, 1.08)
+            rgb = torch.stack([
+                TF.adjust_saturation(
+                    TF.adjust_contrast(
+                        TF.adjust_brightness(
+                            TF.affine(frame, angle, translate, scale, shear=0, fill=0),
+                            brightness,
+                        ),
+                        contrast,
+                    ),
+                    saturation,
+                )
+                for frame in rgb
+            ])
+            clip = (rgb.clamp(0, 1) - MEAN) / STD
         return clip, self.labels[row["label"]]
 
 
@@ -90,6 +125,7 @@ def main() -> int:
     parser.add_argument("--manifest", type=Path, default=Path("data/processed/manifest.csv"))
     parser.add_argument("--data-root", type=Path, default=Path("data/raw/extracted"))
     parser.add_argument("--output", type=Path, default=Path("models/isl_mobilenet_gru.pt"))
+    parser.add_argument("--initialize-from", type=Path, help="Continue training from an existing compatible MobileNetGRU checkpoint")
     parser.add_argument("--epochs", type=int, default=20)
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--frames", type=int, default=12)
@@ -125,17 +161,33 @@ def main() -> int:
     loaders = {key: DataLoader(value, batch_size=args.batch_size, shuffle=key == "train", num_workers=0) for key, value in datasets.items()}
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}; classes={len(classes)}; split_counts={ {k:len(v) for k,v in splits.items()} }; signers={len(signer_splits)}")
-    model = MobileNetGRU(len(classes), pretrained=True).to(device)
+    model = MobileNetGRU(len(classes), pretrained=args.initialize_from is None).to(device)
+    if args.initialize_from:
+        initial = torch.load(args.initialize_from, map_location="cpu", weights_only=True)
+        if initial.get("classes") != classes:
+            raise SystemExit("Initial checkpoint labels do not match the manifest labels")
+        model.load_state_dict(initial["state_dict"])
+        print(f"Initialized from {args.initialize_from}")
     for layer in list(model.features.children())[:-3]:
         for parameter in layer.parameters(): parameter.requires_grad = False
-    optimizer = torch.optim.AdamW((p for p in model.parameters() if p.requires_grad), lr=2e-4, weight_decay=1e-3)
+    optimizer = torch.optim.AdamW((p for p in model.parameters() if p.requires_grad), lr=1e-5 if args.initialize_from else 2e-4, weight_decay=1e-3)
     counts = Counter(row["label"] for row in splits["train"])
     weights = torch.tensor([len(splits["train"]) / (len(classes) * counts[label]) for label in classes], dtype=torch.float32, device=device)
     criterion = nn.CrossEntropyLoss(weight=weights, label_smoothing=0.05)
-    best_f1, best_state, patience = -1.0, None, 0
+    initial_y, initial_pred, _, _ = scores(model, loaders["validation"], device)
+    initial_metrics = classification_metrics(initial_y, initial_pred, len(classes))
+    best_f1 = initial_metrics["macro_f1"]
+    best_state = {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
+    patience = 0
+    print(f"initial_validation_accuracy={initial_metrics['accuracy']:.4f} initial_validation_macro_f1={best_f1:.4f}", flush=True)
     started = time.perf_counter()
     for epoch in range(1, args.epochs + 1):
-        model.train(); loss_sum = 0.0
+        model.train()
+        if args.initialize_from:
+            # Keep pretrained BatchNorm statistics stable on this small set;
+            # gradients still update the unfrozen tail of the visual encoder.
+            model.features.eval()
+        loss_sum = 0.0
         for clips, labels in loaders["train"]:
             clips, labels = clips.to(device), labels.to(device)
             optimizer.zero_grad(set_to_none=True)

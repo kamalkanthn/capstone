@@ -53,3 +53,16 @@ def decode_clip(path: str | Path, frames: int = 12, size: int = 160) -> torch.Te
     while len(samples) < frames:
         samples.append(samples[-1].clone())
     return torch.stack(samples[:frames])
+
+
+def preprocess_rgb_frame(frame: np.ndarray, size: int = 160) -> torch.Tensor:
+    """Resize one RGB frame with the same normalization used during training."""
+    height, width = frame.shape[:2]
+    scale = size / max(height, width)
+    width, height = max(1, round(width * scale)), max(1, round(height * scale))
+    frame = cv2.resize(frame, (width, height), interpolation=cv2.INTER_AREA)
+    canvas = np.zeros((size, size, 3), dtype=np.uint8)
+    x, y = (size - width) // 2, (size - height) // 2
+    canvas[y:y + height, x:x + width] = frame
+    tensor = TF.to_tensor(Image.fromarray(canvas))
+    return (tensor - MEAN) / STD

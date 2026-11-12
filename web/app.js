@@ -1,5 +1,6 @@
 const inputMode = document.querySelector('#inputMode');
 const outputMode = document.querySelector('#outputMode');
+const targetLanguage = document.querySelector('#targetLanguage');
 const routeNote = document.querySelector('#routeNote span:nth-child(2)');
 const textPanel = document.querySelector('#textPanel');
 const mediaPanel = document.querySelector('#mediaPanel');
@@ -8,6 +9,8 @@ const mediaTitle = document.querySelector('#mediaTitle');
 const mediaDescription = document.querySelector('#mediaDescription');
 const uploadLabel = document.querySelector('#uploadLabel');
 const cameraButton = document.querySelector('#cameraButton');
+const recognitionMode = document.querySelector('#recognitionMode');
+const recognitionModeWrap = document.querySelector('#recognitionModeWrap');
 const videoPreview = document.querySelector('#videoPreview');
 const audioPreview = document.querySelector('#audioPreview');
 const cameraPreview = document.querySelector('#cameraPreview');
@@ -19,6 +22,16 @@ let cameraStream = null;
 let recorder = null;
 let audioChunks = [];
 let cameraVideoFile = null;
+let liveRecognition = false;
+let liveTimer = null;
+let liveFrames = [];
+let liveVotes = [];
+let uncertainWindows = 0;
+let lastEmittedLabel = '';
+let transcript = [];
+let inferenceBusy = false;
+let liveSession = 0;
+let backendHealth = null;
 
 const API = 'http://127.0.0.1:4174';
 
@@ -28,10 +41,11 @@ async function checkBackend() {
   try {
     const response = await fetch(`${API}/api/health`);
     const health = await response.json();
+    backendHealth = health;
     badge.innerHTML = `<i></i> ${health.model_available ? 'Model ready' : 'Model setup needed'}`;
     cardState.textContent = health.model_available ? `ISOLATED ${health.vocabulary_size}-SIGN MODEL` : 'MODEL NOT TRAINED YET';
     cardState.className = `cap-status ${health.model_available ? 'available' : 'planned'}`;
-    if (!health.model_available) routeNote.textContent = 'Video can be sampled; train the local isolated-sign model to enable label and confidence predictions.';
+    if (!health.model_available) routeNote.textContent = 'The live camera interface is ready; train the isolated-sign recognizer to enable sign predictions.';
   } catch {
     badge.innerHTML = '<i></i> API offline';
     cardState.textContent = 'API OFFLINE';
@@ -43,10 +57,10 @@ const routeMessages = {
   'video:speech': 'Upload a short isolated sign clip. Review the model’s label candidates, then speak the selected label.',
   'video:sign': 'This route is unsupported: video recognition and verified sign output assets are not available yet.',
   'video:both': 'Upload one isolated sign. Review the top candidate labels and speak your selected result.',
-  'camera:text': 'Record one isolated sign clip, then review the model’s top label candidates.',
-  'camera:speech': 'Record one isolated sign clip. Review the candidates and speak the selected label.',
+  'camera:text': 'Start live recognition. Confirmed isolated signs appear in a running text transcript.',
+  'camera:speech': 'Start live recognition. Confirmed isolated signs appear as text and are spoken aloud.',
   'camera:sign': 'This route is unsupported: live recognition and verified sign output assets are not available yet.',
-  'camera:both': 'Record one isolated sign. Review the candidate labels and speak your selected result.',
+  'camera:both': 'Start live recognition to build a transcript and speak each confirmed sign.',
   'audio:text': 'Audio preview works locally. Speech transcription (ASR) is not connected yet.',
   'audio:speech': 'Audio playback is available in the preview. Transcription and sign conversion are not part of this route.',
   'audio:sign': 'This route is unsupported: ASR and verified sign output assets are not available yet.',
@@ -73,10 +87,12 @@ function modeChanged() {
   clearMedia();
   cameraButton.classList.toggle('hidden', input !== 'camera' && input !== 'microphone');
   cameraButton.textContent = input === 'microphone' ? 'Record audio' : 'Enable camera';
+  document.querySelector('#runButton').classList.toggle('hidden', input === 'camera');
   uploadLabel.classList.toggle('hidden', input === 'camera' || input === 'microphone');
+  recognitionModeWrap.classList.toggle('hidden', input !== 'camera');
   if (input === 'camera') {
-    mediaTitle.textContent = 'Start a local camera preview';
-    mediaDescription.textContent = 'Your camera feed stays in this browser. Record one isolated sign clip, then submit it to the local model.';
+    mediaTitle.textContent = 'Start live sign recognition';
+    mediaDescription.textContent = 'The camera is sampled locally. Confirmed isolated signs are added to a transcript and can be spoken aloud.';
   } else if (input === 'microphone') {
     mediaTitle.textContent = 'Record a local audio sample';
     mediaDescription.textContent = 'You can record and play it back here. Speech transcription (ASR) is not connected.';
@@ -99,6 +115,10 @@ function clearMedia() {
   audioPreview.pause(); audioPreview.removeAttribute('src'); audioPreview.load();
   videoPreview.classList.add('hidden'); audioPreview.classList.add('hidden');
   previewWrap.classList.add('hidden');
+  liveRecognition = false;
+  liveSession++;
+  if (liveTimer) clearInterval(liveTimer);
+  liveTimer = null;
   if (cameraStream) {
     cameraStream.getTracks().forEach(track => track.stop());
     cameraStream = null;
@@ -149,28 +169,14 @@ cameraButton.addEventListener('click', async () => {
       cameraPreview.srcObject = cameraStream;
       cameraPreview.classList.remove('hidden');
       mediaTitle.textContent = 'Camera preview is live';
-      cameraButton.textContent = 'Record sign clip';
+      cameraButton.textContent = 'Start live recognition';
       return;
     }
-    if (recorder?.state === 'recording') {
-      recorder.stop(); cameraButton.textContent = 'Finishing clip…'; return;
+    if (liveRecognition) {
+      stopLiveRecognition();
+      return;
     }
-    audioChunks = [];
-    recorder = new MediaRecorder(cameraStream);
-    recorder.addEventListener('dataavailable', event => { if (event.data.size) audioChunks.push(event.data); });
-    recorder.addEventListener('stop', () => {
-      const stream = cameraStream;
-      stream?.getTracks().forEach(track => track.stop()); cameraStream = null;
-      const blob = new Blob(audioChunks, {type: recorder.mimeType || 'video/webm'});
-      cameraVideoFile = new File([blob], 'camera-sign.webm', {type: blob.type});
-      if (mediaUrl) URL.revokeObjectURL(mediaUrl);
-      mediaUrl = URL.createObjectURL(blob);
-      cameraPreview.srcObject = null; cameraPreview.classList.add('hidden');
-      videoPreview.src = mediaUrl; videoPreview.classList.remove('hidden'); previewWrap.classList.remove('hidden');
-      mediaTitle.textContent = 'Recorded clip ready';
-      cameraButton.textContent = 'Record again';
-    }, {once: true});
-    recorder.start(); cameraButton.textContent = 'Stop recording'; mediaTitle.textContent = 'Recording your sign…';
+    startLiveRecognition();
   } catch (error) {
     mediaTitle.textContent = 'Camera permission unavailable';
     mediaDescription.textContent = error.name === 'NotAllowedError' ? 'Allow camera access in your browser to preview the feed.' : 'No camera could be opened. Check that a camera is connected.';
@@ -183,7 +189,20 @@ document.querySelector('#clearText').addEventListener('click', () => { document.
 function updateCount() { document.querySelector('#charCount').textContent = `${document.querySelector('#textInput').value.length} / 500`; }
 document.querySelector('#textInput').addEventListener('input', updateCount);
 inputMode.addEventListener('change', modeChanged);
-outputMode.addEventListener('change', modeChanged);
+targetLanguage.addEventListener('change', updateLiveTranslation);
+recognitionMode.addEventListener('change', () => {
+  if (recognitionMode.value === 'continuous') {
+    routeNote.textContent = backendHealth?.sentence_model_available
+      ? 'Continuous mode uses the sentence translation model.'
+      : 'Sentence mode is selected, but no trained continuous translation model is installed yet.';
+  } else {
+    routeNote.textContent = 'One sign at a time uses the installed word classifier. Low-score candidates can be reviewed manually.';
+  }
+});
+outputMode.addEventListener('change', () => {
+  routeNote.textContent = routeMessages[`${inputMode.value}:${outputMode.value}`];
+  document.querySelector('#outputIcon').textContent = ({text:'▤',speech:'♫',sign:'◉',both:'↔'})[outputMode.value];
+});
 
 function showResult(title, body, state = 'READY', actions = '') {
   document.querySelector('#resultTitle').textContent = title;
@@ -193,24 +212,227 @@ function showResult(title, body, state = 'READY', actions = '') {
   resultCard.scrollIntoView({behavior:'smooth', block:'nearest'});
 }
 
-document.querySelector('#runButton').addEventListener('click', () => {
+function stopLiveRecognition() {
+  liveRecognition = false;
+  liveSession++;
+  if (liveTimer) clearInterval(liveTimer);
+  liveTimer = null;
+  cameraButton.textContent = 'Start live recognition';
+  mediaTitle.textContent = 'Live camera is paused';
+  document.querySelector('#resultState').textContent = 'PAUSED';
+}
+
+async function startLiveRecognition() {
+  try {
+    const healthResponse = await fetch(`${API}/api/health`);
+    const health = await healthResponse.json();
+    backendHealth = health;
+    if (recognitionMode.value === 'continuous' && !health.sentence_model_available) {
+      throw new Error('No continuous sentence model is installed. The current trained checkpoint recognizes isolated signs only.');
+    }
+    if (!health.model_available) throw new Error('Train or install the local recognition model before starting live recognition.');
+    if (cameraPreview.readyState < 2) await new Promise(resolve => cameraPreview.addEventListener('loadeddata', resolve, {once:true}));
+    liveFrames = []; liveVotes = []; transcript = []; uncertainWindows = 0; lastEmittedLabel = '';
+    liveRecognition = true;
+    const session = ++liveSession;
+    cameraButton.textContent = 'Stop live recognition';
+    mediaTitle.textContent = recognitionMode.value === 'continuous' ? 'Continuous translation is running' : 'Live isolated-sign recognition is running';
+    showResult('Live sign recognition', '<strong>Reviewed English transcript</strong><p id="liveTranscript" class="live-transcript">Waiting for a clear sign…</p><strong>Regional-language output</strong><p id="liveTranslation" class="live-transcript">Select a language to translate.</p><small>Literal translation of recognized labels; this does not add sentence grammar.</small><div class="live-candidate-panel"><strong>Review low-score candidates</strong><div id="liveCandidates"><small>Predictions will appear here.</small></div></div><small id="liveSpeechNotice"></small><br><small id="liveStatus">Collecting camera frames. Top-class scores are model scores, not guaranteed probabilities.</small>', 'STARTING');
+    let lastInferenceAt = 0;
+    liveTimer = setInterval(() => {
+      if (!liveRecognition || !cameraPreview.videoWidth || inferenceBusy) return;
+      const canvas = document.createElement('canvas');
+      canvas.width = 320; canvas.height = Math.round(320 * cameraPreview.videoHeight / cameraPreview.videoWidth);
+      const context = canvas.getContext('2d', {willReadFrequently:false});
+      context.drawImage(cameraPreview, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob(blob => {
+        if (!blob || !liveRecognition) return;
+        liveFrames.push(blob);
+        if (liveFrames.length > 12) liveFrames.shift();
+        const now = performance.now();
+        if (liveFrames.length === 12 && now - lastInferenceAt >= 1500) {
+          lastInferenceAt = now;
+          predictLiveWindow([...liveFrames], session);
+        }
+      }, 'image/jpeg', 0.72);
+    }, 200);
+    document.querySelector('#resultState').textContent = 'LIVE';
+  } catch (error) {
+    liveRecognition = false;
+    cameraButton.textContent = 'Start live recognition';
+    showResult('Live recognition could not start', escapeHtml(error.message), 'UNAVAILABLE');
+  }
+}
+
+async function predictLiveWindow(windowFrames, session) {
+  inferenceBusy = true;
+  try {
+    const form = new FormData();
+    form.append('mode', recognitionMode.value);
+    windowFrames.forEach((frame, index) => form.append('frames', frame, `frame-${index}.jpg`));
+    const response = await fetch(`${API}/api/predict-frames`, {method:'POST', body:form});
+    const payload = await response.json();
+    if (!liveRecognition || session !== liveSession) return;
+    if (!response.ok) throw new Error(typeof payload.detail === 'string' ? payload.detail : JSON.stringify(payload.detail));
+    const status = document.querySelector('#liveStatus');
+    if (status) status.textContent = `Window top-class score ${(payload.confidence * 100).toFixed(0)}% · ${payload.latency_ms.toFixed(0)} ms · a low score needs your review.`;
+    const candidateNode = document.querySelector('#liveCandidates');
+    if (candidateNode) {
+      candidateNode.innerHTML = (payload.alternatives || []).map((candidate, index) => `<button type="button" class="candidate-choice" data-live-label="${escapeHtml(candidate.label)}">${index + 1}. ${escapeHtml(candidate.label)} · ${(candidate.confidence * 100).toFixed(1)}%</button>`).join('') || '<small>No candidates returned.</small>';
+      candidateNode.querySelectorAll('[data-live-label]').forEach(button => button.addEventListener('click', () => acceptReviewedLabel(button.dataset.liveLabel || '')));
+    }
+    if (!payload.accepted) {
+      uncertainWindows++;
+      liveVotes = [];
+      if (uncertainWindows >= 2) lastEmittedLabel = '';
+      return;
+    }
+    uncertainWindows = 0;
+    liveVotes.push(payload.label);
+    if (liveVotes.length > 3) liveVotes.shift();
+    const confirmed = liveVotes.filter(label => label === payload.label).length >= 2;
+    if (!confirmed || payload.label === lastEmittedLabel) return;
+    lastEmittedLabel = payload.label;
+    transcript.push(payload.label);
+    const transcriptNode = document.querySelector('#liveTranscript');
+    if (transcriptNode) transcriptNode.textContent = transcript.join(' ');
+    updateLiveTranslation();
+    if (outputMode.value === 'speech' || outputMode.value === 'both') speakLiveText(payload.label);
+  } catch (error) {
+    if (!liveRecognition || session !== liveSession) return;
+    const status = document.querySelector('#liveStatus');
+    if (status) status.textContent = `Recognition paused: ${error.message}`;
+  } finally {
+    inferenceBusy = false;
+  }
+}
+
+const speechTags = {kn:'kn-IN', hi:'hi-IN', ta:'ta-IN', te:'te-IN', ml:'ml-IN'};
+let liveTranslationRequest = 0;
+const translationCache = new Map();
+
+async function translateText(text, language = targetLanguage.value) {
+  if (language === 'en') return {translated_text:text, speech_tag:'en-US', provider:'None'};
+  const cacheKey = `${language}\u0000${text}`;
+  if (translationCache.has(cacheKey)) return translationCache.get(cacheKey);
+  const response = await fetch(`${API}/api/translate`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({text, target_language:language})
+  });
+  const payload = await response.json();
+  if (!response.ok) throw new Error(typeof payload.detail === 'string' ? payload.detail : JSON.stringify(payload.detail));
+  translationCache.set(cacheKey, payload);
+  if (translationCache.size > 200) translationCache.delete(translationCache.keys().next().value);
+  return payload;
+}
+
+function waitForSpeechVoices() {
+  const voices = speechSynthesis.getVoices();
+  if (voices.length) return Promise.resolve(voices);
+  return new Promise(resolve => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      resolve(speechSynthesis.getVoices());
+    };
+    speechSynthesis.addEventListener('voiceschanged', finish, {once:true});
+    setTimeout(finish, 1500);
+  });
+}
+
+function setSpeechNotice(message) {
+  const notice = document.querySelector('#speechNotice') || document.querySelector('#liveSpeechNotice');
+  if (notice) notice.textContent = message;
+}
+
+async function speakText(text, language = targetLanguage.value) {
+  if (!('speechSynthesis' in window)) {
+    setSpeechNotice('Speech synthesis is unavailable in this browser.');
+    return false;
+  }
+  speechSynthesis.cancel();
+  const voices = await waitForSpeechVoices();
+  const requestedPrefix = language === 'en' ? 'en' : (speechTags[language] || language).slice(0, 2).toLowerCase();
+  const voice = voices.find(item => item.lang.toLowerCase().startsWith(requestedPrefix));
+  if (language !== 'en' && !voice) {
+    const languageName = targetLanguage.querySelector(`option[value="${language}"]`)?.textContent || language;
+    setSpeechNotice(`This browser has no ${languageName} speech voice, so it will not fall back to English. If Windows offers text-to-speech for ${languageName}, install it under Settings → Time & language → Language & region → Language options, then restart the browser. The translated text is still available above.`);
+    return false;
+  }
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = speechTags[language] || 'en-US';
+  if (voice) utterance.voice = voice;
+  setSpeechNotice(voice ? `Speaking with ${voice.name} (${voice.lang}).` : 'Speaking with the browser’s default English voice.');
+  speechSynthesis.speak(utterance);
+  return true;
+}
+
+async function speakLiveText(text) {
+  const language = targetLanguage.value;
+  try {
+    const output = await translateText(text, language);
+    speakText(output.translated_text, language);
+  } catch (error) {
+    const status = document.querySelector('#liveStatus');
+    if (status) status.textContent = `Translation or speech unavailable: ${error.message}`;
+  }
+}
+
+async function updateLiveTranslation() {
+  const node = document.querySelector('#liveTranslation');
+  if (!node) return;
+  const requestId = ++liveTranslationRequest;
+  const language = targetLanguage.value;
+  if (language === 'en') { node.textContent = 'English selected'; return; }
+  if (!transcript.length) { node.textContent = 'Waiting for recognized signs…'; return; }
+  node.textContent = 'Translating recognized labels…';
+  try {
+    const translatedLabels = await Promise.all(transcript.map(label => translateText(label, language)));
+    if (requestId === liveTranslationRequest && node.isConnected) node.textContent = translatedLabels.map(item => item.translated_text).join(' ');
+  } catch (error) {
+    if (requestId === liveTranslationRequest && node.isConnected) node.textContent = `Translation unavailable: ${error.message}`;
+  }
+}
+
+function acceptReviewedLabel(label) {
+  if (!label) return;
+  transcript.push(label);
+  const transcriptNode = document.querySelector('#liveTranscript');
+  if (transcriptNode) transcriptNode.textContent = transcript.join(' ');
+  updateLiveTranslation();
+  if (outputMode.value === 'speech' || outputMode.value === 'both') speakLiveText(label);
+  const status = document.querySelector('#liveStatus');
+  if (status) status.textContent = `You selected “${label}”. Review future low-score suggestions the same way.`;
+}
+
+document.querySelector('#runButton').addEventListener('click', async () => {
   const input = inputMode.value, output = outputMode.value;
   if (input === 'text') {
     const message = document.querySelector('#textInput').value.trim();
     if (!message) { showResult('Add a message first', 'Type a message in the input box to continue.', 'NEEDS INPUT'); return; }
-    if (output === 'text') { showResult('Text output', `<strong>${escapeHtml(message)}</strong><br><br>This output displays your original text; it does not translate it.`); return; }
     if (output === 'sign') { lookupSign(message); return; }
-    if (!('speechSynthesis' in window)) { showResult('Speech is unavailable', 'This browser does not expose its built-in speech synthesis feature.', 'UNAVAILABLE'); return; }
-    const speak = `<div class="speech-controls"><button id="speakButton">▶ Speak message</button><button id="stopSpeech">■ Stop</button></div>`;
-    showResult(output === 'both' ? 'Text + spoken audio' : 'Spoken audio', `<strong>${escapeHtml(message)}</strong><br><br>Spoken with the selected browser voice. No translation is performed.`, 'READY', speak);
-    document.querySelector('#speakButton').addEventListener('click', () => { speechSynthesis.cancel(); speechSynthesis.speak(new SpeechSynthesisUtterance(message)); });
-    document.querySelector('#stopSpeech').addEventListener('click', () => speechSynthesis.cancel());
+    showResult('Translating message', 'Preparing the selected language output…', 'PROCESSING');
+    try {
+      const language = targetLanguage.value;
+      const translated = await translateText(message, language);
+      const regional = language !== 'en';
+      const languageName = targetLanguage.selectedOptions[0].textContent;
+      const display = regional
+        ? `<div><small>English</small><br><strong>${escapeHtml(message)}</strong></div><div class="translation-result"><small>${escapeHtml(languageName)}</small><br><strong>${escapeHtml(translated.translated_text)}</strong></div><small>Automatic translation by ${escapeHtml(translated.provider)}. Review before relying on it. The text is sent to the translation provider.</small>`
+        : `<strong>${escapeHtml(message)}</strong><br><small>English selected; no translation service was called.</small>`;
+      const controls = output === 'text' ? '' : `<div class="speech-controls"><button id="speakButton">▶ Speak output</button><button id="stopSpeech">■ Stop</button></div>`;
+      showResult(output === 'both' ? 'Text + spoken audio' : output === 'text' ? 'Translated text' : 'Spoken audio', `${display}<br><small id="speechNotice"></small>`, 'READY', controls);
+      document.querySelector('#speakButton')?.addEventListener('click', () => speakText(translated.translated_text, language));
+      document.querySelector('#stopSpeech')?.addEventListener('click', () => speechSynthesis.cancel());
+    } catch (error) {
+      showResult('Translation unavailable', `${escapeHtml(error.message)}<br><br>Check internet access or choose English.`, 'UNAVAILABLE');
+    }
     return;
   }
   if (input === 'camera') {
-    if (cameraStream) { showResult('Finish recording first', 'Stop the camera recording, then prepare the recorded clip.', 'NEEDS INPUT'); return; }
-    if (cameraVideoFile) { recognizeVideo(cameraVideoFile, output); return; }
-    showResult('Record a sign clip first', 'Enable the camera and record an isolated sign clip. Recognition runs once after you choose Prepare output.', 'NEEDS INPUT'); return;
+    if (liveRecognition) { showResult('Live translation is running', 'Confirmed sign labels are being added to the transcript below the camera.', 'LIVE'); return; }
+    showResult('Start the live camera', 'Choose “Live camera” above, allow camera access, then select “Start live recognition.”', 'NEEDS INPUT'); return;
   }
   if (input === 'video' || input === 'audio') {
     const file = mediaFile.files?.[0];
@@ -236,11 +458,7 @@ async function recognizeVideo(file, output) {
       wireCandidateChoices(output);
       return;
     }
-    const label = payload.label;
-    const controls = `<div class="speech-controls">${output === 'text' ? '' : '<button id="speakButton">▶ Speak selected label</button>'}<button id="copyResult">Copy selected text</button></div>`;
-    showResult('Recognized sign', `<strong id="recognizedLabel">${escapeHtml(label)}</strong><br><br>Isolated vocabulary prediction · Confidence ${(payload.confidence * 100).toFixed(1)}% · ${payload.latency_ms.toFixed(0)} ms<br><small>${escapeHtml(payload.message)}</small>${candidatePanel}`, 'REVIEW RESULT', controls);
-    document.querySelector('#speakButton')?.addEventListener('click', speakRecognizedLabel);
-    document.querySelector('#copyResult')?.addEventListener('click', copyRecognizedLabel);
+    await showRecognizedResult(payload.label, output, `Isolated vocabulary prediction · Confidence ${(payload.confidence * 100).toFixed(1)}% · ${payload.latency_ms.toFixed(0)} ms. ${payload.message}`, candidatePanel);
     wireCandidateChoices(output);
   } catch (error) {
     showResult('Recognition unavailable', `${escapeHtml(error.message)}<br><br>Check that the local API and trained checkpoint are running.`, 'UNAVAILABLE');
@@ -250,27 +468,38 @@ async function recognizeVideo(file, output) {
 function wireCandidateChoices(output = 'text') {
   document.querySelectorAll('.candidate-choice').forEach(button => button.addEventListener('click', () => {
     const selected = button.dataset.label || '';
-    const labelNode = document.querySelector('#recognizedLabel');
-    if (labelNode) {
-      labelNode.textContent = selected;
-      document.querySelector('#resultTitle').textContent = 'Review selected label';
-      document.querySelector('#resultState').textContent = 'USER REVIEW';
-    } else {
-      const controls = `<div class="speech-controls">${output === 'text' ? '' : '<button id="speakButton">▶ Speak selected label</button>'}<button id="copyResult">Copy selected text</button></div>`;
-      showResult('Review selected label', `<strong id="recognizedLabel">${escapeHtml(selected)}</strong><br><br>Selected from the model’s candidate labels.`, 'USER REVIEW', controls);
-      document.querySelector('#speakButton')?.addEventListener('click', speakRecognizedLabel);
-      document.querySelector('#copyResult')?.addEventListener('click', copyRecognizedLabel);
-    }
+    showRecognizedResult(selected, output, 'Selected from the model’s candidate labels.', '', 'USER REVIEW', 'Review selected label');
   }));
 }
 
+async function showRecognizedResult(label, output, note, candidatePanel = '', state = 'REVIEW RESULT', title = 'Recognized sign') {
+  const language = targetLanguage.value;
+  let translated = {translated_text:label, speech_tag:'en-US', provider:'None'};
+  let translationNote = 'English selected.';
+  if (language !== 'en') {
+    try {
+      translated = await translateText(label, language);
+      translationNote = `Automatic ${escapeHtml(translated.target_language_name)} translation by ${escapeHtml(translated.provider)}; review before relying on it.`;
+    } catch (error) {
+      translationNote = `Translation unavailable: ${escapeHtml(error.message)}. Showing the English label.`;
+    }
+  }
+  const spoken = translated.translated_text;
+  const speechLanguage = translated.speech_tag === 'en-US' ? 'en' : language;
+  const controls = `<div class="speech-controls">${output === 'text' ? '' : '<button id="speakButton">▶ Speak output</button>'}<button id="copyResult">Copy output</button></div>`;
+  const body = `<div><small>English recognized label</small><br><strong id="recognizedLabel">${escapeHtml(label)}</strong></div><div class="translation-result"><small>${escapeHtml(targetLanguage.selectedOptions[0].textContent)}</small><br><strong id="translatedLabel">${escapeHtml(spoken)}</strong></div><small>${translationNote}</small><br><small>${escapeHtml(note)}</small><br><small id="speechNotice"></small>${candidatePanel}`;
+  showResult(title, body, state, controls);
+  document.querySelector('#speakButton')?.addEventListener('click', () => speakText(spoken, speechLanguage));
+  document.querySelector('#copyResult')?.addEventListener('click', async () => navigator.clipboard.writeText(spoken));
+}
+
 function speakRecognizedLabel() {
-  const label = document.querySelector('#recognizedLabel')?.textContent || '';
-  if (label && 'speechSynthesis' in window) { speechSynthesis.cancel(); speechSynthesis.speak(new SpeechSynthesisUtterance(label)); }
+  const label = document.querySelector('#translatedLabel')?.textContent || document.querySelector('#recognizedLabel')?.textContent || '';
+  if (label) speakText(label, targetLanguage.value);
 }
 
 async function copyRecognizedLabel() {
-  const label = document.querySelector('#recognizedLabel')?.textContent || '';
+  const label = document.querySelector('#translatedLabel')?.textContent || document.querySelector('#recognizedLabel')?.textContent || '';
   if (label) await navigator.clipboard.writeText(label);
 }
 

@@ -1,0 +1,6 @@
+-r requirements.txt
+glosl==0.1.0
+transformers>=4.30
+sentencepiece
+sacrebleu>=2.3
+rouge-score>=0.1

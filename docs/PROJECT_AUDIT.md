@@ -12,12 +12,13 @@ The workspace contains research PDFs and reports, a 12-slide panel deck, additio
 
 | Area | State and evidence |
 |---|---|
-| Local website | Node.js server on loopback; browser video/audio preview, camera recording, typed text, and built-in browser speech. |
+| Local website | Node.js server on loopback; live camera windows, video/audio preview, typed text, running isolated-sign transcript, and built-in browser speech. |
 | Video preprocessing | Ordered fixed-length RGB frame sampler; a real archive clip decoded to a finite 12×3×160×160 tensor. |
 | Data | Amrita SLR v1 archive downloaded and extracted locally. Inventory found 978 videos in 49 numbered class folders, with no signer metadata in the archive. Source record reports 50 signs and 7 signers; one class discrepancy remains unresolved. |
 | Manifest | `scripts/prepare_amrita.py` creates reproducible per-class clip-stratified train/validation/test splits. `scripts/validate_dataset.py` passed against all 978 files. This is not a signer-independent protocol. |
 | Model | MobileNetV3-Small visual encoder with bidirectional GRU temporal head. Trained locally on the RTX 3050; clean unaugmented clip-level test: 54.4% accuracy, 0.524 macro-F1, 194 ms mean decode-plus-model latency per clip. |
 | Inference API | FastAPI video upload prediction, health endpoint, and exact dataset-label recorded clip lookup. Local Node server starts the API when `.venv` is present. |
+| Regional language | English text and recognized isolated labels can be sent to MyMemory for Kannada, Hindi, Tamil, Telugu, or Malayalam machine translation. Internet is required; text is transmitted to the provider and outputs need review. |
 | Text to sign | Exact dataset-label lookup of a recorded clip, including multiword class labels such as “good morning.” No sentence planning, grammar conversion, generated animation, or avatar. |
 | Speech/audio | Browser TTS for typed text and spoken recognized labels. ASR and audio-to-sign are absent. |
 | Generalization | Signer IDs are unavailable in the archive. The pilot split is clip-level, so test signers may occur in train. Unknown-sign rejection is not calibrated with out-of-vocabulary clips. |
@@ -38,4 +39,4 @@ The workspace contains research PDFs and reports, a 12-slide panel deck, additio
 
 ## Required limitations
 
-The present classifier handles **one isolated sign per clip**. It does not recognize continuous sentence streams or sign boundaries, generate fluent English, or establish signer-independent performance. The output clip lookup is a vocabulary demonstration only. ASR, speech-to-sign, regional-language translation, and animated/avatar sign generation remain future work.
+The live interface repeatedly classifies isolated-sign windows and smooths labels into a stream. It does not recognize sentence boundaries, decode ISL grammar, generate fluent English, or establish signer-independent performance. Regional translation translates the resulting English text, but a stream of isolated labels is not a grammatical sentence. The output clip lookup is a vocabulary demonstration only. ASR, speech-to-sign, and animated/avatar sign generation remain future work.
